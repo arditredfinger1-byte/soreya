@@ -1,0 +1,1154 @@
+-- @rrisdans v6.46 | Fish + Rod + AFK + TP + Trade + Favorite + FPS Boost + Destroy Small Notification (Clean)
+-- Butuh: Infinite Yield loaded
+-- + Receiver Trade (Auto Accept, Auto Ready, Auto Confirm, Notif TradeSelesai)
+
+if getgenv then
+    getgenv().WindUI = nil
+    getgenv().WindUILoaded = nil
+end
+
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+if not WindUI or not WindUI.CreateWindow then warn("[@rrisdans] WindUI gagal load!") return end
+
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local UIS = game:GetService("UserInputService")
+local VU = game:GetService("VirtualUser")
+local LP = Players.LocalPlayer
+
+local WS  = game:GetService("Workspace")
+local LT  = game:GetService("Lighting")
+local TR  = WS.Terrain
+local RD  = settings().Rendering
+local SS  = game:GetService("SoundService")
+
+local S = {
+    Running=false, AutoSell=false, SellInterval=30, Timeout=0.1,
+    AntiAFK=true,
+    LastTeleport = "Spot Core",
+    TradeRunning = false,
+    AutoAccept = false,
+    ReceiverAutoReady = false,
+    ReceiverAutoConfirm = false,
+    AutoFav = false, FavInterval = 0.5,
+    FavRarity = {}, FavMutasi = {},
+    SelectedPlayer = nil,
+    TradeRarity = {},
+    TradeFishName = {},
+    TradeFavorite = "All",
+    TradeQuantity = 0,
+}
+
+local CAST_POWER = 99
+local MINIGAME_DELAY = 0.5
+local READY_DELAY = 7
+local CONFIRM_DELAY = 7
+
+local TPDATA = {
+    ["Base Camp"] = {462, 448, -8749},
+    ["Toko"]      = {-6671, 1331, -9901},
+    ["Spot Core"] = {-9031, 1251, -6510},
+    ["Pantai"]    = {-8196, 1241, -6277},
+}
+
+local RARITY_LIST = {"Common","Uncommon","Rare","Epic","Legendary","Mythical","Secret","Forgotten"}
+
+local MUTASI_LIST = {}
+pcall(function()
+    local MV = RS:FindFirstChild("MutasiVFXKenyal")
+    if MV then
+        local tmp = {}
+        for _, c in ipairs(MV:GetChildren()) do
+            if c.Name ~= "_AuraDasar" then table.insert(tmp, c.Name) end
+        end
+        table.sort(tmp, function(a, b) return string.lower(a) < string.lower(b) end)
+        for _, name in ipairs(tmp) do table.insert(MUTASI_LIST, name) end
+    end
+end)
+if #MUTASI_LIST == 0 then MUTASI_LIST = {"None"} end
+
+local RARITY_WITH_NONE = (function()
+    local t = {"None"}
+    for _, r in ipairs(RARITY_LIST) do table.insert(t, r) end
+    return t
+end)()
+
+local MUTATION_WITH_ALL = (function()
+    local t = {"None", "[SELECT ALL]"}
+    for _, m in ipairs(MUTASI_LIST) do table.insert(t, m) end
+    return t
+end)()
+
+local function getPlayerNames()
+    local list = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LP then table.insert(list, plr.Name) end
+    end
+    if #list == 0 then list = {"(no player)"} end
+    return list
+end
+
+local function getFishNameList()
+    local names = {}
+    local r = RS:FindFirstChild("Remote")
+    r = r and r:FindFirstChild("Trade")
+    local remote = r and r:FindFirstChild("DaftarIkan")
+    if remote then
+        local ok, items = pcall(function() return remote:InvokeServer("") end)
+        if ok and items then
+            local counts = {}
+            for _, item in ipairs(items) do
+                if item.nama then
+                    counts[item.nama] = (counts[item.nama] or 0) + 1
+                end
+            end
+            for name, count in pairs(counts) do
+                table.insert(names, {name = name, count = count})
+            end
+            table.sort(names, function(a, b) return string.lower(a.name) < string.lower(b.name) end)
+        end
+    end
+    if #names == 0 then return {"(no fish)"} end
+    local formatted = {}
+    for _, entry in ipairs(names) do
+        table.insert(formatted, entry.name .. " x" .. entry.count)
+    end
+    return formatted
+end
+
+local function destroyNotifyGui()
+    local destroyed = 0
+    local pg = LP:FindFirstChild("PlayerGui")
+    if not pg then return 0 end
+
+    local smallNotif = pg:FindFirstChild("Small Notification")
+    if smallNotif then
+        pcall(function() smallNotif:Destroy() end)
+        destroyed = destroyed + 1
+    end
+
+    return destroyed
+end
+
+local function runFpsBoost()
+    pcall(function() RD.QualityLevel = Enum.QualityLevel.Level01 end)
+    pcall(function() RD.EagerBulkExecution = true end)
+    pcall(function() RD.MeshPartDetailLevel = Enum.MeshPartDetailLevel.Level01 end)
+    pcall(function() RD.ViewportFrameDetailLevel = Enum.ViewportFrameDetailLevel.Lowest end)
+
+    pcall(function()
+        LT.GlobalShadows = false; LT.FogEnd = 9e9; LT.FogStart = 9e9
+        LT.Brightness = 0; LT.OutdoorAmbient = Color3.new()
+        LT.EnvironmentDiffuseScale = 0; LT.EnvironmentSpecularScale = 0
+        LT.ClockTime = 12; LT.GeographicLatitude = 0; LT.ShadowSoftness = 0
+    end)
+
+    pcall(function()
+        WS.GlobalWind = Vector3.zero
+        WS.FallenPartsDestroyHeight = -1e6
+    end)
+
+    pcall(function()
+        if sethiddenproperty then pcall(sethiddenproperty, TR, "Decoration", false) end
+        TR.WaterReflectance = 0; TR.WaterWaveSize = 0
+        TR.WaterWaveSpeed = 0; TR.WaterTransparency = 1
+    end)
+
+    pcall(function()
+        SS.AmbientReverb = Enum.ReverbType.NoReverb
+        SS.DistanceFactor = 0; SS.DopplerScale = 0
+        SS.RespectFilteringEnabled = false
+    end)
+
+    local SP = Enum.Material.SmoothPlastic
+    local seen = setmetatable({}, {__mode="k"})
+
+    local function optimize(o)
+        if seen[o] then return end
+        seen[o] = true
+        local c = o.ClassName
+
+        if c == "Sound" then
+            pcall(function() o.Volume=0; o.Playing=false; o.Enabled=false; o.Looped=false end)
+        elseif c == "ParticleEmitter" then
+            pcall(function() o.Rate=0; o.Enabled=false; o.Lifetime=NumberRange.new(0) end)
+        elseif c=="Trail" or c=="Beam" or c=="Fire" or c=="Smoke" or c=="Sparkles" then
+            pcall(function() o.Enabled=false end)
+        elseif c == "Explosion" then
+            pcall(function() o.BlastPressure=0; o.BlastRadius=0; o.DestroyJointRadiusPercent=0 end)
+        elseif c=="PointLight" or c=="SpotLight" or c=="SurfaceLight" then
+            pcall(function() o.Enabled=false; o.Brightness=0; o.Range=0 end)
+        elseif c == "Decal" then
+            pcall(function() o.Transparency = 1 end)
+        elseif c == "Texture" then
+            pcall(function() o.Transparency=1; o.StudsPerTileU=512; o.StudsPerTileV=512 end)
+        elseif c == "Sky" then
+            pcall(function()
+                o.SkyboxBk=""; o.SkyboxDn=""; o.SkyboxFt=""
+                o.SkyboxLf=""; o.SkyboxRt=""; o.SkyboxUp=""
+                o.CelestialBodiesShown=false; o.StarCount=0
+            end)
+        elseif c == "Atmosphere" then
+            pcall(function()
+                o.Density=0; o.Haze=0; o.Glare=0; o.Offset=0
+                o.Color=Color3.new(); o.Decay=Color3.new()
+            end)
+        elseif c == "Clouds" then
+            pcall(function() o.Enabled=false; o.Cover=0; o.Density=0; o.Transparency=1 end)
+        elseif o:IsA("PostEffect") then
+            pcall(function() o.Enabled = false end)
+        elseif o:IsA("MeshPart") then
+            pcall(function()
+                o.Material=SP; o.Reflectance=0; o.CanQuery=false; o.CanTouch=false
+                o.CastShadow=false
+                o.RenderFidelity=Enum.RenderFidelity.Performance
+                o.CollisionFidelity=Enum.CollisionFidelity.Box
+            end)
+        elseif o:IsA("BasePart") then
+            pcall(function()
+                o.Material=SP; o.Reflectance=0; o.CanQuery=false
+                o.CanTouch=false; o.CastShadow=false
+            end)
+        elseif o:IsA("Humanoid") then
+            pcall(function() o.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None end)
+        end
+    end
+
+    for _,v in ipairs(WS:GetDescendants()) do optimize(v) end
+    WS.DescendantAdded:Connect(optimize)
+    for _,v in ipairs(RS:GetDescendants()) do optimize(v) end
+    RS.DescendantAdded:Connect(optimize)
+    for _,v in ipairs(LT:GetDescendants()) do optimize(v) end
+    LT.DescendantAdded:Connect(optimize)
+
+    if LP then
+        for _,v in ipairs(LP:GetDescendants()) do optimize(v) end
+        LP.DescendantAdded:Connect(optimize)
+    end
+end
+
+local afkConn
+local function startAFK()
+    if afkConn then return end
+    afkConn = LP.Idled:Connect(function()
+        if not S.AntiAFK then return end
+        pcall(function() VU:Button2Down(Vector2.new(), workspace.CurrentCamera.CFrame) end)
+        task.wait(1)
+        pcall(function() VU:Button2Up(Vector2.new(), workspace.CurrentCamera.CFrame) end)
+    end)
+end
+
+local sig = Instance.new("BindableEvent")
+local triggerCount = 0
+
+sig.Event:Connect(function()
+    triggerCount = triggerCount + 1
+end)
+
+local function tp(x,y,z)
+    if getgenv().InfYield and getgenv().InfYield.TPos then
+        if pcall(function() getgenv().InfYield.TPos(Vector3.new(x,y,z)) end) then return true end
+    end
+    local c = LP.Character
+    local h = c and c:FindFirstChild("HumanoidRootPart")
+    if h then
+        pcall(function()
+            h.AssemblyLinearVelocity = Vector3.zero
+            h.AssemblyAngularVelocity = Vector3.zero
+            h.CFrame = CFrame.new(x,y,z)
+        end)
+        pcall(function() c:PivotTo(CFrame.new(x,y,z)) end)
+        return true
+    end
+    return false
+end
+
+local function sellAll()
+    local e = RS:FindFirstChild("Remote")
+    e = e and e:FindFirstChild("Mancing")
+    e = e and e:FindFirstChild("JualSemua")
+    if e then pcall(function() e:InvokeServer() end) end
+end
+
+local function valid(i)
+    if not i then return false end
+    local ok, p = pcall(function() return i.Parent end)
+    return ok and p ~= nil
+end
+
+local function isRod(t)
+    if not valid(t) or not t:IsA("Tool") then return false end
+    local m = t:FindFirstChild("Mechanics")
+    local r = m and m:FindFirstChild("Remotes")
+    return valid(r) and valid(r:FindFirstChild("CastEvent")) and valid(r:FindFirstChild("MiniGame"))
+end
+
+local function equipRod()
+    local c = LP.Character
+    if not c then return false end
+    local hum = c:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+    local equipped = c:FindFirstChildOfClass("Tool")
+    if isRod(equipped) then return true end
+    local bp = LP:FindFirstChild("Backpack")
+    if bp then
+        for _, t in ipairs(bp:GetChildren()) do
+            if isRod(t) then pcall(function() hum:EquipTool(t) end) return true end
+        end
+    end
+    for _, t in ipairs(c:GetChildren()) do
+        if isRod(t) then pcall(function() hum:EquipTool(t) end) return true end
+    end
+    return false
+end
+
+local function findRod()
+    local c = LP.Character
+    if not c then return nil end
+    local eq = c:FindFirstChildOfClass("Tool")
+    if isRod(eq) then
+        local m = eq:FindFirstChild("Mechanics")
+        return m and m:FindFirstChild("Remotes")
+    end
+    for _, t in ipairs(c:GetChildren()) do
+        if isRod(t) then
+            local m = t:FindFirstChild("Mechanics")
+            return m and m:FindFirstChild("Remotes")
+        end
+    end
+    return nil
+end
+
+local function getRemote(n)
+    local r = findRod()
+    if not valid(r) then return nil end
+    local x = r:FindFirstChild(n)
+    return valid(x) and x or nil
+end
+
+local hooked = false
+local function hook()
+    if hooked or not hookmetamethod then return end
+    local mt = getrawmetatable(game)
+    local old = mt.__namecall
+    setreadonly(mt, false)
+    mt.__namecall = newcclosure(function(self, ...)
+        local m = getnamecallmethod()
+        pcall(function()
+            if m == "FireServer" and self and self.Name == "TandaSeruBersama" then sig:Fire() end
+        end)
+        return old(self, ...)
+    end)
+    setreadonly(mt, true)
+    hooked = true
+end
+
+local function fwd()
+    local c = LP.Character
+    local h = c and c:FindFirstChild("HumanoidRootPart")
+    if not h then return Vector3.new(0,0,-1) end
+    local l = h.CFrame.LookVector
+    return Vector3.new(l.X,0,l.Z).Unit
+end
+
+local function cast()
+    local e = getRemote("CastEvent")
+    if not e then return false end
+    return pcall(function() e:FireServer(false, CAST_POWER, fwd()) end)
+end
+
+local function mini()
+    local e = getRemote("MiniGame")
+    if not e then return false end
+    return pcall(function() e:FireServer(true) end)
+end
+
+local function waitTrig(expectedCount)
+    local t = tick()
+    while triggerCount <= expectedCount
+      and S.Running
+      and findRod()
+      and (tick() - t) <= S.Timeout do
+        task.wait(0.5)
+    end
+
+    if triggerCount > expectedCount then
+        task.wait(MINIGAME_DELAY)
+        return true
+    end
+
+    return false
+end
+
+local function cycle()
+    if not findRod() then
+        equipRod()
+        task.wait(0.3)
+    end
+    if not findRod() then
+        task.wait(0.5)
+        return
+    end
+
+    local beforeCast = triggerCount
+
+    if not cast() then return end
+
+    if not waitTrig(beforeCast) then
+        return
+    end
+
+    if not findRod() then
+        equipRod()
+        task.wait(0.1)
+    end
+
+    if findRod() then mini() end
+end
+
+local function startFish()
+    if S.Running then return end
+    equipRod() task.wait(0.3) equipRod() hook()
+    S.Running = true
+    task.spawn(function()
+        while S.Running do
+            if not findRod() then
+                equipRod()
+                task.wait(0.5)
+            else
+                local ok, err = pcall(cycle)
+                if not ok then warn("[FISH] "..tostring(err)) task.wait(1) end
+            end
+        end
+    end)
+end
+
+local function startSell()
+    if S.AutoSell then return end
+    S.AutoSell = true
+    task.spawn(function()
+        while S.AutoSell do task.wait(S.SellInterval) if S.AutoSell then sellAll() end end
+    end)
+end
+
+local autoTradeThread = nil
+local countdownThread = nil
+local tradeState = {
+    Active = false,
+    MyConfirm = false, TheirConfirm = false,
+    MyReady = false, TheirReady = false,
+    SentIkan = {},
+    LastConfirmAt = 0,
+    LastReadyAt = 0,
+    TargetCount = 0,
+    SentToTrade = false,
+    LastUpdateAt = 0,
+    Phase = nil,
+    ReadyAt = 0,
+    ConfirmAt = 0,
+}
+
+local MAX_IKAN_PER_TRADE = 20
+
+local function getTradeRemote(name)
+    local r = RS:FindFirstChild("Remote")
+    r = r and r:FindFirstChild("Trade")
+    return r and r:FindFirstChild(name)
+end
+
+local function sendTradeInvite(userId)
+    local remote = getTradeRemote("KirimTawaran")
+    if not remote then return false end
+    return pcall(function() remote:InvokeServer(userId) end)
+end
+
+local function confirmTrade()
+    local remote = getTradeRemote("Konfirmasi")
+    if not remote then return false end
+    if tick() - (tradeState.LastConfirmAt or 0) < 1 then return false end
+    tradeState.LastConfirmAt = tick()
+    return pcall(function() remote:InvokeServer() end)
+end
+
+local function acceptTrade()
+    local remote = getTradeRemote("JawabTawaran")
+    if not remote then return false end
+    return pcall(function() remote:InvokeServer(true) end)
+end
+
+local function setReady()
+    local remote = getTradeRemote("SetSiap")
+    if not remote then return false end
+    if tick() - (tradeState.LastReadyAt or 0) < 1 then return false end
+    tradeState.LastReadyAt = tick()
+    return pcall(function() remote:InvokeServer(true) end)
+end
+
+local function addItemToTrade(uid)
+    local remote = getTradeRemote("TambahItem")
+    if not remote then return false end
+    local ok, result = pcall(function() return remote:InvokeServer(uid) end)
+    return ok and result == true
+end
+
+local function getFishList()
+    local remote = getTradeRemote("DaftarIkan")
+    if not remote then return {} end
+    local ok, r = pcall(function() return remote:InvokeServer("") end)
+    return (ok and r) or {}
+end
+
+local function calculateTargetAndFilter()
+    local items = getFishList()
+    local filtered = {}
+
+    for _, item in ipairs(items) do
+        local pass = true
+        if #S.TradeRarity > 0 then
+            local ok = false
+            for _, r in ipairs(S.TradeRarity) do
+                if r == item.rarity then ok = true break end
+            end
+            if not ok then pass = false end
+        end
+        if pass and #S.TradeFishName > 0 then
+            local ok = false
+            for _, n in ipairs(S.TradeFishName) do
+                if item.nama == n then ok = true break end
+            end
+            if not ok then pass = false end
+        end
+        if pass and S.TradeFavorite then
+            if S.TradeFavorite == "Favorite Only" and item.favorit ~= true then pass = false end
+            if S.TradeFavorite == "Non-Favorite" and item.favorit ~= false then pass = false end
+        end
+        if pass then table.insert(filtered, item) end
+    end
+
+    local limit = MAX_IKAN_PER_TRADE
+    if S.TradeQuantity and S.TradeQuantity > 0 then
+        limit = math.min(S.TradeQuantity, MAX_IKAN_PER_TRADE)
+    end
+
+    local limited = {}
+    for i = 1, math.min(limit, #filtered) do
+        table.insert(limited, filtered[i])
+    end
+
+    return limited
+end
+
+local function resetTradeTracker()
+    tradeState.SentIkan = {}
+    tradeState.SentToTrade = false
+    tradeState.TargetCount = 0
+    tradeState.Phase = nil
+    tradeState.ReadyAt = 0
+    tradeState.ConfirmAt = 0
+end
+
+local function startCountdownThread()
+    if countdownThread then return end
+    countdownThread = task.spawn(function()
+        while S.TradeRunning or tradeState.Active do
+            if tradeState.Phase == "WAIT_READY" 
+               and tradeState.ReadyAt > 0 
+               and tick() >= tradeState.ReadyAt 
+               and not tradeState.MyReady then
+                setReady()
+                tradeState.Phase = "WAIT_CONFIRM"
+                tradeState.ConfirmAt = tick() + CONFIRM_DELAY
+            end
+
+            if tradeState.Phase == "WAIT_CONFIRM" 
+               and tradeState.ConfirmAt > 0 
+               and tick() >= tradeState.ConfirmAt 
+               and not tradeState.MyConfirm then
+                confirmTrade()
+                tradeState.Phase = nil
+            end
+
+            task.wait(0.2)
+        end
+        countdownThread = nil
+    end)
+end
+
+local tradeMulaiConn = nil
+local tradeUpdateConn = nil
+local tradeSelesaiConn = nil
+
+local function setupTradeListeners()
+    if tradeMulaiConn then return end
+
+    local tawaran = getTradeRemote("TawaranMasuk")
+    if tawaran then
+        tawaran.OnClientEvent:Connect(function(data)
+            if type(data) ~= "table" then return end
+            pcall(function()
+                Window:Notify({
+                    Title="Trade Masuk",
+                    Content=tostring(data.nama)..(S.AutoAccept and " (auto ✅)" or " (manual)"),
+                    Duration=3,
+                    Icon="handshake"
+                })
+            end)
+            if S.AutoAccept then
+                task.spawn(function()
+                    task.wait(0.5)
+                    acceptTrade()
+                end)
+            end
+        end)
+    end
+
+    local mulai = getTradeRemote("TradeMulai")
+    if mulai then
+        tradeMulaiConn = mulai.OnClientEvent:Connect(function(data)
+            if type(data) ~= "table" then return end
+            tradeState.Active = true
+            resetTradeTracker()
+            pcall(function()
+                Window:Notify({Title="Trade", Content="Mulai: "..tostring(data.nama), Duration=2, Icon="handshake"})
+            end)
+        end)
+    end
+
+    local update = getTradeRemote("TradeUpdate")
+    if update then
+        tradeUpdateConn = update.OnClientEvent:Connect(function(data)
+            if type(data) ~= "table" then return end
+
+            tradeState.LastUpdateAt = tick()
+
+            if data.kamu then
+                tradeState.MyConfirm = data.kamu.konfirmasi == true
+                tradeState.MyReady = data.kamu.siap == true
+            end
+            if data.lawan then
+                tradeState.TheirConfirm = data.lawan.konfirmasi == true
+                tradeState.TheirReady = data.lawan.siap == true
+            end
+
+            -- ===== RECEIVER MODE =====
+            -- Receiver cuma nerima, siap, konfirmasi. TIDAK setor ikan.
+            if not S.TradeRunning and tradeState.Active then
+
+                -- AUTO READY (SetSiap)
+                if S.ReceiverAutoReady and not tradeState.MyReady then
+                    if tradeState.TheirReady or data.tahap == "konfirmasi" then
+                        task.spawn(function()
+                            task.wait(0.3)
+                            if not tradeState.MyReady and tradeState.Active then
+                                setReady()
+                            end
+                        end)
+                    end
+                end
+
+                -- AUTO CONFIRM (Konfirmasi)
+                if S.ReceiverAutoConfirm and not tradeState.MyConfirm then
+                    if tradeState.TheirConfirm or data.tahap == "konfirmasi" then
+                        task.spawn(function()
+                            task.wait(0.3)
+                            if not tradeState.MyConfirm and tradeState.Active then
+                                confirmTrade()
+                            end
+                        end)
+                    end
+                end
+
+                return   -- receiver selesai, jangan lanjut ke sender logic
+            end
+
+            if not S.TradeRunning then return end
+
+            if data.tahap == "susun" then
+                task.spawn(function()
+                    if not tradeState.SentToTrade then
+                        local filtered = calculateTargetAndFilter()
+                        tradeState.TargetCount = #filtered
+                        tradeState.SentToTrade = true
+
+                        if tradeState.TargetCount == 0 then
+                            tradeState.Phase = "WAIT_READY"
+                            tradeState.ReadyAt = tick() + READY_DELAY
+                            startCountdownThread()
+                            return
+                        end
+
+                        for _, item in ipairs(filtered) do
+                            if not S.TradeRunning then break end
+                            if addItemToTrade(item.uid) then
+                                tradeState.SentIkan[item.uid] = true
+                            end
+                            task.wait(0.15)
+                        end
+
+                        tradeState.Phase = "WAIT_READY"
+                        tradeState.ReadyAt = tick() + READY_DELAY
+                        startCountdownThread()
+                    end
+                end)
+            end
+
+            if tradeState.TheirReady and not tradeState.MyReady then
+                task.spawn(function()
+                    task.wait(0.3)
+                    if not tradeState.MyReady then
+                        setReady()
+                        if tradeState.Phase ~= "WAIT_CONFIRM" then
+                            tradeState.Phase = "WAIT_CONFIRM"
+                            tradeState.ConfirmAt = tick() + CONFIRM_DELAY
+                        end
+                    end
+                end)
+            end
+
+            if tradeState.TheirConfirm and not tradeState.MyConfirm then
+                task.spawn(function()
+                    task.wait(0.3)
+                    if not tradeState.MyConfirm then
+                        confirmTrade()
+                        tradeState.Phase = nil
+                    end
+                end)
+            end
+
+            if data.tahap == "konfirmasi" then
+                if not tradeState.MyConfirm then
+                    task.spawn(function()
+                        task.wait(0.3)
+                        if not tradeState.MyConfirm then
+                            confirmTrade()
+                        end
+                    end)
+                end
+            end
+        end)
+    end
+
+    -- ===== NOTIF TRADE SELESAI =====
+    local selesai = getTradeRemote("TradeSelesai")
+    if selesai then
+        tradeSelesaiConn = selesai.OnClientEvent:Connect(function(success, msg)
+            pcall(function()
+                Window:Notify({
+                    Title="Trade Selesai",
+                    Content=success and ("✅ "..tostring(msg)) or ("❌ "..tostring(msg)),
+                    Duration=3,
+                    Icon=success and "check" or "x"
+                })
+            end)
+            tradeState.Active = false
+            resetTradeTracker()
+        end)
+    end
+end
+
+setupTradeListeners()
+
+local function startAutoTradeCore()
+    if autoTradeThread then return end
+    if not S.SelectedPlayer or S.SelectedPlayer == "(no player)" then
+        pcall(function() Window:Notify({Title="Trade", Content="Pilih player dulu!", Duration=3, Icon="x"}) end)
+        return
+    end
+
+    local userId = nil
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Name == S.SelectedPlayer then
+            userId = plr.UserId
+            break
+        end
+    end
+
+    if not userId then
+        pcall(function() Window:Notify({Title="Trade", Content="Player gak ada", Duration=3, Icon="x"}) end)
+        return
+    end
+
+    S.TradeRunning = true
+    autoTradeThread = task.spawn(function()
+        while S.TradeRunning do
+            if not tradeState.Active then
+                resetTradeTracker()
+                sendTradeInvite(userId)
+            else
+                if tradeState.LastUpdateAt and tick() - tradeState.LastUpdateAt > 15 then
+                    tradeState.Active = false
+                    resetTradeTracker()
+                end
+            end
+
+            local t = tick()
+            while S.TradeRunning and tick() - t < 3 do task.wait(0.2) end
+        end
+        autoTradeThread = nil
+    end)
+end
+
+local function stopAutoTradeCore()
+    S.TradeRunning = false
+    autoTradeThread = nil
+    tradeState.Active = false
+end
+
+local favRemote = nil
+pcall(function()
+    local r = RS:FindFirstChild("Remote")
+    r = r and r:FindFirstChild("Mancing")
+    favRemote = r and r:FindFirstChild("TandaiFavorit")
+end)
+
+local ambilRemote = nil
+pcall(function()
+    local r = RS:FindFirstChild("Remote")
+    r = r and r:FindFirstChild("Inventaris")
+    ambilRemote = r and r:FindFirstChild("AmbilSemua")
+end)
+
+local function getInv()
+    if not ambilRemote then return {} end
+    local ok, r = pcall(function() return ambilRemote:InvokeServer() end)
+    return (ok and r) or {}
+end
+
+local function contains(list, val)
+    for _, v in ipairs(list) do if v == val then return true end end
+    return false
+end
+
+local function favMatch(item)
+    if #S.FavRarity > 0 then
+        if not contains(S.FavRarity, item.rarity) then return false end
+    end
+    if #S.FavMutasi > 0 then
+        if not contains(S.FavMutasi, item.mutasi) then return false end
+    end
+    return true
+end
+
+local function doFav()
+    if not favRemote then return end
+    local items = getInv()
+    for _, item in ipairs(items) do
+        if favMatch(item) and item.favorit == false then
+            pcall(function() favRemote:FireServer(item.uid, true) end)
+            task.wait(0.02)
+        end
+    end
+end
+
+local function doUnfavAll()
+    if not favRemote then return 0, 0 end
+    local items = getInv()
+    local unfaved = 0
+    for _, item in ipairs(items) do
+        if item.favorit == true then
+            pcall(function() favRemote:FireServer(item.uid, false) end)
+            unfaved = unfaved + 1
+            task.wait(0.02)
+        end
+    end
+    return unfaved, #items
+end
+
+local favThread = nil
+local function startAutoFav()
+    if favThread then return end
+    S.AutoFav = true
+    favThread = task.spawn(function()
+        while S.AutoFav do
+            doFav()
+            local t = tick()
+            while S.AutoFav and tick() - t < S.FavInterval do task.wait(0.05) end
+        end
+        favThread = nil
+    end)
+end
+local function stopAutoFav() S.AutoFav = false favThread = nil end
+
+local Window = WindUI:CreateWindow({
+    Title="@rrisdans Auto Fish", Icon="fish", Author="@rrisdans",
+    Folder="@rrisdans", Size=UDim2.fromOffset(460,500), Transparent=true,
+    Theme="Dark", User={Enabled=true, Anonymous=true},
+})
+
+-- 1. Fishing
+local FT = Window:Tab({Title="Fishing", Icon="anchor"})
+FT:Toggle({Title="AUTO FISHING", Value=true, Callback=function(v) if v then startFish() else S.Running=false end end})
+FT:Toggle({Title="AUTO SELL ALL", Value=true, Callback=function(v) if v then startSell() else S.AutoSell=false end end})
+FT:Divider()
+FT:Section({Title="Adjust", TextXAlignment="Left"})
+FT:Input({Title="Timeout (detik)", Value="0.1", Placeholder="0.1", Callback=function(t) local n=tonumber(t) if n and n>0 then S.Timeout=n end end})
+FT:Input({Title="Auto Sell Interval (detik)", Value="30", Placeholder="30", Callback=function(t) local n=tonumber(t) if n and n>0 then S.SellInterval=n end end})
+
+-- 2. Favorite
+local AF = Window:Tab({Title="Favorite", Icon="star"})
+AF:Section({Title="Auto Favorite Fish", TextXAlignment="Left"})
+AF:Toggle({
+    Title="AUTO FAV",
+    Value=false,
+    Callback=function(v)
+        if v then startAutoFav() else stopAutoFav() end
+    end,
+})
+AF:Divider()
+AF:Section({Title="Select Rarity", TextXAlignment="Left"})
+AF:Dropdown({
+    Title="Rarity (bisa pilih banyak)",
+    Values=RARITY_WITH_NONE,
+    Value={},
+    Multi=true,
+    SearchBarEnabled=true,
+    Callback=function(opt)
+        S.FavRarity = {}
+        if typeof(opt)=="table" then
+            for _,v in ipairs(opt) do
+                local val = typeof(v)=="table" and v.Title or v
+                if val ~= "None" then table.insert(S.FavRarity, val) end
+            end
+        elseif opt and opt~="" and opt~="None" then
+            table.insert(S.FavRarity, opt)
+        end
+    end,
+})
+AF:Divider()
+AF:Section({Title="Select Mutation", TextXAlignment="Left"})
+AF:Dropdown({
+    Title="Mutation (A-Z)",
+    Values=MUTATION_WITH_ALL,
+    Value={},
+    Multi=true,
+    SearchBarEnabled=true,
+    Callback=function(opt)
+        S.FavMutasi = {}
+        local selectAll = false
+        local list = {}
+
+        if typeof(opt)=="table" then
+            for _,v in ipairs(opt) do
+                local val = typeof(v)=="table" and v.Title or v
+                table.insert(list, val)
+            end
+        elseif opt and opt~="" then
+            table.insert(list, opt)
+        end
+
+        for _, val in ipairs(list) do
+            if val == "[SELECT ALL]" then selectAll = true break end
+        end
+
+        if selectAll then
+            for _, m in ipairs(MUTASI_LIST) do
+                table.insert(S.FavMutasi, m)
+            end
+        else
+            for _, val in ipairs(list) do
+                if val ~= "None" and val ~= "[SELECT ALL]" then
+                    table.insert(S.FavMutasi, val)
+                end
+            end
+        end
+    end,
+})
+AF:Divider()
+AF:Button({
+    Title="UNFAVORITE ALL FISH",
+    Callback=function()
+        doUnfavAll()
+    end,
+})
+
+-- 3. Trade
+local TR = Window:Tab({Title="Trade", Icon="handshake"})
+TR:Section({Title="Player Selection", TextXAlignment="Left"})
+
+local PlayerDropdown
+PlayerDropdown = TR:Dropdown({
+    Title="Select Player",
+    Values=getPlayerNames(),
+    Value="(no player)",
+    Callback=function(opt)
+        if opt == "(no player)" then return end
+        S.SelectedPlayer = opt
+    end,
+})
+
+TR:Button({
+    Title="REFRESH PLAYER LIST",
+    Callback=function()
+        local list = getPlayerNames()
+        pcall(function() PlayerDropdown:Refresh(list) end)
+    end,
+})
+
+TR:Divider()
+TR:Section({Title="Trade Filter", TextXAlignment="Left"})
+
+TR:Dropdown({
+    Title="Rarity",
+    Values=RARITY_WITH_NONE,
+    Value={},
+    Multi=true,
+    SearchBarEnabled=true,
+    Callback=function(opt)
+        S.TradeRarity = {}
+        if typeof(opt)=="table" then
+            for _,v in ipairs(opt) do
+                local val = typeof(v)=="table" and v.Title or v
+                if val ~= "None" then table.insert(S.TradeRarity, val) end
+            end
+        elseif opt and opt~="" and opt~="None" then
+            table.insert(S.TradeRarity, opt)
+        end
+    end,
+})
+
+TR:Dropdown({
+    Title="Fish Name (bisa pilih banyak)",
+    Desc="Klik lagi buat unselect. Kosong = semua ikan",
+    Values=getFishNameList(),
+    Value={},
+    Multi=true,
+    SearchBarEnabled=true,
+    Callback=function(opt)
+        S.TradeFishName = {}
+        if typeof(opt) == "table" then
+            for _, v in ipairs(opt) do
+                local raw = typeof(v) == "table" and v.Title or v
+                local name = raw:match("^(.+) x%d+$") or raw
+                if name ~= "(no fish)" then table.insert(S.TradeFishName, name) end
+            end
+        elseif opt and opt ~= "" and opt ~= "(no fish)" then
+            local name = opt:match("^(.+) x%d+$") or opt
+            table.insert(S.TradeFishName, name)
+        end
+    end,
+})
+
+TR:Dropdown({
+    Title="Favorite Filter", Values={"All","Favorite Only","Non-Favorite"}, Value="All",
+    Callback=function(opt) S.TradeFavorite = opt end,
+})
+
+TR:Input({
+    Title="Quantity (0 = all)", Value="0", Placeholder="0",
+    Callback=function(t) local n=tonumber(t) if n and n>=0 then S.TradeQuantity=n end end,
+})
+
+TR:Divider()
+TR:Section({Title="Auto Trade", TextXAlignment="Left"})
+
+TR:Toggle({
+    Title="AUTO TRADE (Sender)",
+    Value=false,
+    Callback=function(v)
+        if v then
+            if not S.SelectedPlayer or S.SelectedPlayer == "(no player)" then
+                pcall(function() Window:Notify({Title="Trade", Content="Pilih player dulu!", Duration=3, Icon="x"}) end)
+                return
+            end
+            startAutoTradeCore()
+        else
+            stopAutoTradeCore()
+        end
+    end,
+})
+
+TR:Toggle({
+    Title="AUTO ACCEPT (Receiver)",
+    Value=false,
+    Desc="Otomatis terima tawaran trade",
+    Callback=function(v)
+        S.AutoAccept = v
+    end,
+})
+
+TR:Toggle({
+    Title="AUTO READY (Receiver)",
+    Value=false,
+    Desc="Otomatis SetSiap saat trade",
+    Callback=function(v)
+        S.ReceiverAutoReady = v
+    end,
+})
+
+TR:Toggle({
+    Title="AUTO CONFIRM (Receiver)",
+    Value=false,
+    Desc="Otomatis Konfirmasi saat trade",
+    Callback=function(v)
+        S.ReceiverAutoConfirm = v
+    end,
+})
+
+-- 4. Teleport
+local TT = Window:Tab({Title="Teleport", Icon="map-pin"})
+TT:Section({Title="Lokasi Teleport", TextXAlignment="Left"})
+TT:Dropdown({
+    Title="Pilih Lokasi", Values={"None","Base Camp","Toko","Spot Core","Pantai"}, Value=S.LastTeleport,
+    Callback=function(opt)
+        S.LastTeleport = opt
+        if opt == "None" then return end
+        local d = TPDATA[opt]
+        if not d then return end
+        tp(d[1], d[2], d[3]) task.wait(0.3) tp(d[1], d[2], d[3])
+    end,
+})
+
+-- 5. Misc
+local MT = Window:Tab({Title="Misc", Icon="settings"})
+MT:Section({Title="Utility", TextXAlignment="Left"})
+MT:Toggle({Title="ANTI-AFK", Value=true, Callback=function(v) S.AntiAFK=v end})
+
+MT:Divider()
+MT:Section({Title="FPS Boost", TextXAlignment="Left"})
+
+MT:Toggle({
+    Title="FPS BOOST",
+    Value=false,
+    Callback=function(v)
+        if v then
+            runFpsBoost()
+        end
+    end,
+})
+
+MT:Divider()
+MT:Section({Title="Notify Control", TextXAlignment="Left"})
+
+MT:Button({
+    Title="DESTROY Small Notification",
+    Callback=function()
+        destroyNotifyGui()
+    end,
+})
+
+startAFK()
+
+local min = false
+local function tryMin()
+    min = not min
+    for _, fn in ipairs({
+        function() return Window.Minimize and Window:Minimize() end,
+        function() return Window.ToggleMinimize and Window:ToggleMinimize() end,
+        function() return Window.SetMinimized and Window:SetMinimized(min) end,
+        function() return Window.Toggle and Window:Toggle() end,
+    }) do
+        local ok, r = pcall(fn) if ok and r then return end
+    end
+end
+
+UIS.InputBegan:Connect(function(i, gp)
+    if gp then return end
+    if i.KeyCode == Enum.KeyCode.L then tryMin() end
+end)
+
+task.spawn(function()
+    task.wait(1)
+    local d = TPDATA["Spot Core"]
+    if d then tp(d[1], d[2], d[3]) task.wait(0.3) tp(d[1], d[2], d[3]) end
+    startFish() startSell()
+end)
